@@ -1,44 +1,66 @@
-import { Controller, UseGuards, UseInterceptors, Post, UploadedFile, Body, Get,Param, Put } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport'
-import { diskStorage} from 'multer'
-import { FileInterceptor} from '@nestjs/platform-express'
+import { Controller, UseGuards, Post, UseInterceptors, UploadedFile, Req, Res, Body, Get, Param, Put } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 import { UserActivityService } from 'src/services/user-activity/user-activity.service';
-import { LikeOrDislikeViewModel } from 'src/domain/schema/like-or-dislike.viewmodel';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { extname } from 'path';
+import { diskStorage } from 'multer';
+import { ParseParamPipe } from 'src/pipes/parse-param.pipe';
+import { LikeOrDislikeViewModel } from 'src/domain/view-model/media/like-dislike.viewmodel';
+import { MediaCommentViewModel } from 'src/domain/view-model/media/media-comment.viewmodel';
 
 //com essa linha abaixo, todas as rotas vão exigir authentificação de segurança
 @UseGuards(AuthGuard('jwt'))
 @Controller('user-activity')
 export class UserActivityController {
-    constructor (private readonly UserActivityService: UserActivityService){
-
-    }
+    constructor(private readonly userActivityService: UserActivityService) { }
 
     @Get(':index')
     getRecentImages(
-        @Param('index') index: string
-        ){
-            return this.UserActivityService.getRecentUploads(index)
-        }
-    
+        @Param('index', new ParseParamPipe()) index: number) {
+        return this.userActivityService.getRecentImages(index);
+    }
+
+    @Put('like-or-dislike')
+    likeOrDislikeMedia(@Body() likeOrDislike: LikeOrDislikeViewModel) {
+        return this.userActivityService.likeOrDislikeMedia(likeOrDislike);
+    }
+
+    @Put('comment-in-activity')
+    postCommentInActivity(@Body() postComment: MediaCommentViewModel) {
+        return this.userActivityService.postComment(postComment);
+    }
+
     @Post('upload')
     @UseInterceptors(
         FileInterceptor('image', {
-                storage: diskStorage({
-                    destination: '../images/',
-                    filename: (req, file, callback) => { callback(null, file.originalname);},
+            storage: diskStorage({
+                destination: '../4tech2019-backend-images/',
+                filename: editFileName,
             }),
-          }),
-    )
+            fileFilter: imageFileFilter,
+        }))
     postImage(
-        @UploadedFile()file,
+        @UploadedFile() file,
         @Body('userId') userId: string,
         @Body('description') description: string,
-        
-    ){
-        return this.UserActivityService.uploadImage(userId, file.originalname, description)
-    }
-    @Put('like-or-dislike')
-    likeOrDislikeUserActivity(@Body() LikeOrDislikeViewModel: LikeOrDislikeViewModel){
-        return this.UserActivityService.likeOrDislikeUserActivity(LikeOrDislikeViewModel)
+    ) {
+        return this.userActivityService.postImage(userId, file.filename, description);
     }
 }
+
+export const imageFileFilter = (req, file, callback) => {
+    if (!file.originalname.match(/\.(jpg|jpeg|png)$/)) {
+        return callback(new Error('Only image files are allowed!'), false);
+    }
+    callback(null, true);
+};
+
+export const editFileName = (req, file, callback) => {
+    const name = file.originalname.split('.')[0];
+    const fileExtName = extname(file.originalname);
+    const randomName = Array(4)
+        .fill(null)
+        .map(() => Math.round(Math.random() * 16).toString(16))
+        .join('');
+    callback(null, `${name}-${randomName}${fileExtName}`);
+};

@@ -1,34 +1,48 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { UserRepositorie } from 'src/repositories/user-repositorie/user-repositorie';
-import { UserViewModel } from 'src/domain/user.viewmodel';
-import { LoginViewModel } from 'src/domain/login.viewmodel';
+import { Injectable, BadRequestException, NotImplementedException } from '@nestjs/common';
+import { UserRepository } from 'src/mongo/repository/user.repository';
+import { User } from 'src/mongo/schemas/user.schema';
+import { UserViewModel } from 'src/domain/view-model/user/user.viewmodel';
 
 @Injectable()
 export class UserService {
-    constructor(private userRepository: UserRepositorie) {
 
+    constructor(private readonly userRepository: UserRepository) {
     }
-    getUsers() {
-        return this.userRepository.getUsers();
-    }
-  async  createNewUser(newUser: UserViewModel){
-        // return this.userRepository.createUser(newUser)
-      
-        const userList = await this.userRepository.getUsers()
-        const existingUser = userList.find(x => x.userName === newUser.userName)
 
-        if (existingUser){
-            throw new BadRequestException('This username already exists!')
+    async getAllUsers(): Promise<User[] | undefined> {
+        return await this.userRepository.get();
+    }
+
+    async getUserById(id: string): Promise<User | undefined> {
+        const user = await this.userRepository.getById(id);
+
+        if (!user) {
+            throw new BadRequestException(`There's no user with id ${id}`);
         }
-        return this.userRepository.createUser(newUser)
+
+        return user;
     }
 
- async attemptLogin(login: LoginViewModel){
-        const userList = await this.userRepository.getUsers();
-        const foundLogin = userList.find (x =>
-            x.userLogin === login.userLogin &&
-            x.userPassword === login.userPassword
-            )
-    return foundLogin
+    async createUser(newUser: UserViewModel): Promise<User> {
+
+        const alreadyExistingUser = await this.userRepository.getByLogin(newUser.userLogin, newUser.password);
+
+        if (alreadyExistingUser) {
+            throw new BadRequestException('This username already exists!');
+        }
+
+        return await this.userRepository.create(newUser);
+    }
+
+    async updateUser(updateUser: UserViewModel, id: string): Promise<string> {
+        await this.userRepository.update(updateUser, id);
+
+        return 'User successfully updated!';
+    }
+
+    async deleteUser(id: string): Promise<string> {
+        await this.userRepository.delete(id);
+
+        return 'User successfully deleted!';
     }
 }

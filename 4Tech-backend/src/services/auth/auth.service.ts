@@ -1,21 +1,23 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { LoginViewModel } from 'src/domain/login.viewmodel';
+import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { UserService } from '../user/user.service';
 import { JwtService } from '@nestjs/jwt';
-import { UserRepositorie } from 'src/repositories/user-repositorie/user-repositorie';
+import { UserRepository } from 'src/mongo/repository/user.repository';
 
 @Injectable()
 export class AuthService {
-    constructor(private userRepository: UserRepositorie, private jwtService: JwtService){
+    constructor(
+        private readonly userRepository: UserRepository,
+        private readonly jwtService: JwtService) { }
+
+    async login(user: any): Promise<any> {
+        const payload = await this.userRepository.getByLogin(user.userLogin, user.password);
+
+        if (!payload) { throw new BadRequestException('Incorrect Credentials!'); }
+
+        return {
+            access_token: this.jwtService.sign(payload),
+            _id: payload._id,
+        };
     }
-   async login(login: LoginViewModel){
-        const user = await this.userRepository.getByCredentials(login.userLogin, login.userPassword)
-            if (!user){
-                throw new BadRequestException('Incorrect Credentials')
-            }
-            return{ 
-                access_token: this.jwtService.sign({status: 'Authorized'}),
-                userId: user._id,
-            }
-    }
+
 }
- 

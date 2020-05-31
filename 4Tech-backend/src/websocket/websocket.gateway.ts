@@ -1,13 +1,29 @@
-import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
+import { SubscribeMessage, WebSocketGateway, MessageBody, ConnectedSocket, WebSocketServer } from '@nestjs/websockets';
+import { Socket } from 'dgram';
+import { Server } from 'http';
 
-//injecteble
 @WebSocketGateway()
 export class WebsocketGateway {
-  
+
   @WebSocketServer() server;
 
-  notifyOneLike(userActivityId: string, userId: string){
-    this.server.emit('events', {mediald: userActivityId, userActivityId, userId})
+  afterInit() {
+    // tslint:disable-next-line:no-console
+    console.log('Websocket Started');
+  }
+
+  handleConnection(@ConnectedSocket() client: Socket) {
+    // tslint:disable-next-line:no-console
+    console.log('User Connected');
+  }
+
+  handleDisconnect(@ConnectedSocket() client: Socket) {
+    // tslint:disable-next-line:no-console
+    console.log('User Disconnected');
+  }
+
+  notifyConnectedClients(mediaId: string, userId: string) {
+    this.server.emit('events', { mediaId, userId });
   }
 
 }

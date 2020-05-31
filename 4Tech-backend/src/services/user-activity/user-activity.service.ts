@@ -1,81 +1,102 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { UserRepositorie } from 'src/repositories/user-repositorie/user-repositorie';
-import { UserActivityDto } from 'src/domain/dto/user-activity.dto';
-import { UserActivityCommentDto } from 'src/domain/dto/user-activity-comment.dto';
-import { UserActivityRepository } from 'src/repositories/user-repositorie/user-activity-repository/user-activity.repository';
-import { read, readFileSync } from 'fs';
-import { UserActivity } from 'src/domain/schema/user-activity.schema';
-import { LikeOrDislikeViewModel } from 'src/domain/schema/like-or-dislike.viewmodel';
+import { UserActivityRepository } from 'src/mongo/repository/user-activity.repository';
+import { isNull } from 'util';
+import { readFileSync } from 'fs';
+import { Media } from 'src/mongo/schemas/media.schema';
+import { UserService } from '../user/user.service';
+import { ImageUploadDto } from 'src/domain/dto/media/image-upload.dto';
+import { MediaCommentViewModel } from 'src/domain/view-model/media/media-comment.viewmodel';
+import { LikeOrDislikeViewModel } from 'src/domain/view-model/media/like-dislike.viewmodel';
 import { WebsocketGateway } from 'src/websocket/websocket.gateway';
-
 
 @Injectable()
 export class UserActivityService {
-        constructor(private readonly userRepository: UserRepositorie,
-                    private readonly userActivityRepository: UserActivityRepository,
-                    private readonly websocketGateway: WebsocketGateway){
-        }
+    constructor(
+        private readonly userActivityRepository: UserActivityRepository,
+        private readonly userService: UserService,
+        private readonly websocketGateway: WebsocketGateway) {
+    }
 
-     async getRecentUploads(index: string){
-            const indexAsNumber = parseInt(index, 10)
-            if(isNaN(indexAsNumber)){
-                throw new BadRequestException('Invalid Index')
-            }
-            const recentUploads = await this.userActivityRepository.getPaged(indexAsNumber)
-            return this.converterImagesToBase64(recentUploads);
-        }
-        async likeOrDislikeUserActivity(likeOrDislikeViewModel: LikeOrDislikeViewModel){
-            const userActivity = await this.userActivityRepository.getById(likeOrDislikeViewModel.userActivityId)
-            if (!userActivity){
-                throw new BadRequestException('An user Activity with the given id does not exist')
-            }
-            const user = await this.userRepository.getById(likeOrDislikeViewModel.userId)
-            if(!user){
-                throw new BadRequestException('An User with the given id does not exist.')
-            }
+    async postImage(userId: string, filename: string, description: string) {
 
-            if(userActivity.likes.includes(user._id.toString())){
-                userActivity.likes = userActivity.likes.filter(x => x !== user._id.toString())
-            }else{
-                userActivity.likes.push(user._id.toString())
-            }
-            // return await this.userActivityRepository.update(userActivity)
-            const updatedUserActivity = await this.userActivityRepository.update(userActivity)
-            this.websocketGateway.notifyOneLike(userActivity._id, userActivity.userId)
-            
-            return updatedUserActivity
-        }
+        if (isNull(userId) || userId === '') { throw new BadRequestException('The UserId can\'t be null'); }
 
-        async uploadImage(userId: string, filename: string, description: string){
-            const user =await this.userRepository.getById(userId)
-            if (!user){
-                throw new BadRequestException('This user does not exist.')
-            }
-            const uploadImageObj = new UserActivityDto(userId, filename, user.userName)
-            if(description){
-                uploadImageObj.comments.push(new UserActivityCommentDto(
-                    userId,
-                    user.userName,
-                    description,
-            ))
-            }
-            const createdUserActivity = await this.userActivityRepository.create(uploadImageObj)
-            return this.convertImageToBase64ForOneFile(createdUserActivity)
-        }
-        converterImagesToBase64(userActivities: UserActivity[] ){
-            return Promise.all(
-                userActivities.map(userActivity =>{
-                    return{
-                        ...userActivity,
-                        imgEncoded: readFileSync('../images/' + userActivity.fileName, 'base64'),
-                    };
-                }),
+        const user = await this.userService.getUserById(userId);
+        if (isNull(user)) { throw new BadRequestException('An user with the given UserId was not found '); }
+
+        const imageUploadDto: ImageUploadDto = new ImageUploadDto(
+            userId,
+            user.userName,
+            filename,
+        );
+
+        if (!isNull(description) && description !== '') {
+            imageUploadDto.mediaComments.push(
+                new MediaCommentViewModel(userId, user.userName, description),
             );
         }
-        convertImageToBase64ForOneFile(userActivity: UserActivity){
-            return { 
-                ...userActivity,
-                imgEncoded: readFileSync('../images/' + userActivity.fileName, 'base64'),
-            }
+
+        const uploadedImage = await this.userActivityRepository.insert(imageUploadDto);
+
+        return this.convertSingleImageToBase64(uploadedImage);
+    }
+
+    async getRecentImages(index: number) {
+        if (isNull(index)) { index = 0; }
+
+        const recentUploadedImages = await this.userActivityRepository.getPaged(index);
+
+        const encodedImages = this.convertImagesToBase64(recentUploadedImages);
+
+        return encodedImages;
+    }
+
+    convertSingleImageToBase64(imageDto: ImageUploadDto) {
+        return {
+            ...imageDto,
+            imgEncoded: readFileSync('../4tech2019-backend-images/' + imageDto.filename, 'base64'),
+        };
+    }
+
+    convertImagesToBase64(imagesDto: Media[]) {
+
+        return Promise.all(imagesDto.map(imgObj => {
+
+            return { ...imgObj, imgEncoded: readFileSync('../4tech2019-backend-images/' + imgObj.filename, 'base64') };
+
+        }));
+    }
+
+    async likeOrDislikeMedia(likeOrDislike: LikeOrDislikeViewModel) {
+
+        const media = await this.userActivityRepository.getById(likeOrDislike.mediaId);
+        if (isNull(media)) { throw new BadRequestException('A Post with the given PostId could not be found'); }
+
+        if (media.likes.includes(likeOrDislike.userId)) {
+            media.likes = media.likes.filter(x => x !== likeOrDislike.userId);
+        } else {
+            media.likes = media.likes.concat(likeOrDislike.userId);
         }
+
+        await this.userActivityRepository.update(media);
+
+        this.websocketGateway.notifyConnectedClients(media._id, media.userId);
+
+        return 'Activity successfully liked/disliked!';
+    }
+
+    async postComment(postCommentDto: MediaCommentViewModel) {
+        const post = await this.userActivityRepository.getById(postCommentDto.mediaId);
+        if (isNull(post)) { throw new BadRequestException('A Post with the given PostId could not be found'); }
+
+        const user = await this.userService.getUserById(postCommentDto.userId);
+        if (isNull(user)) { throw new BadRequestException('An user with the given UserId was not found '); }
+
+        post.mediaComments = post.mediaComments.concat(new MediaCommentViewModel(postCommentDto.userId, user.userName, postCommentDto.comment));
+
+        const updated = await this.userActivityRepository.update(post);
+
+        return updated.mediaComments.pop();
+    }
+
 }
